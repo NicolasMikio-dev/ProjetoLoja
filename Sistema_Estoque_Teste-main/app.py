@@ -160,7 +160,7 @@ def editar(id):
 
 # CORREÇÃO PRINCIPAL: rota renomeada de '/registrarVendas.html' para '/registrarVendas'.
 # Era esse o motivo do erro 404: a página (GET) respondia em '/registrarVendas.html',
-# mas o formulário enviava o POST para '/registrarVendas' (sem .html), URL que não existia.
+# mas o formulário enviava o POST para 'S' (sem .html), URL que não existia.
 @app.route('/registrarVendas', methods=['GET', 'POST'])
 @login_required 
 def registrarVendas():
