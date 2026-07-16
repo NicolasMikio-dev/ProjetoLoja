@@ -1,10 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for 
+from flask import Flask, render_template, request, redirect, url_for, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask import flash
 import os
 from datetime import datetime
-import pandas as pdd 
+import pandas as pd
 import io
 
 app = Flask(__name__)
@@ -20,9 +20,9 @@ class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     senha = db.Column(db.String(50), nullable=False)
-    produtos = db.relationship('Produto', backref='dono', lazy=True)
-    vendas = db.relationship('Venda', backref='dono', lazy='True')
-    fiados = db.relationship('Venda', backref='dono', lazy='True')
+    produtos = db.relationship('Produto', backref='dono', lazy='select')
+    vendas = db.relationship('Venda', backref='dono', lazy='select')
+    fiados = db.relationship('Fiado', backref='dono', lazy='select')
 
 class Produto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -191,7 +191,83 @@ def registrarVendas():
     vendas = Venda.query.filter_by(usuario_id=current_user.id).order_by(Venda.data_venda.desc()).all()
     return render_template('registrarVendas.html', vendas=vendas)
 
+@app.route('/deletar_venda/<int:id>')
+@login_required
+def deletar_venda(id):
+    venda = Venda.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    db.session.delete(venda)
+    db.session.commit()
+    return redirect(url_for('registrarVendas'))
 
+@app.route('/fiados')
+@login_required
+def fiados():
+    lista_fiados = Fiado.query.filter_by(usuario_id=current_user.id).order_by(Fiado.data_venda.desc()).all()
+    return render_template('fiados.html', fiados=lista_fiados)
+
+@app.route('/editar_fiado/<int:id>', methods=['GET', 'POST'])
+@login_required
+def editar_fiado(id):
+    fiado = Fiado.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        fiado.cliente = request.form['cliente']
+        fiado.produto_nome = request.form['produto_nome']
+        fiado.valor_fiado = float(request.form['valor_fiado'])
+        db.session.commit()
+        flash('Registro de fiado atualizado!', 'success')
+        return redirect(url_for('fiados'))
+    return render_template('editar_fiado.html', fiado=fiado)
+
+@app.route('/deletar_fiado/<int:id>')
+@login_required
+def deletar_fiado(id):
+    fiado = Fiado.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    db.session.delete(fiado)
+    db.session.commit()
+    flash('Devedor removido com sucesso!', 'success')
+    return redirect(url_for('fiados'))
+
+@app.route('/exportar_excel')
+@login_required
+def exportar_excel():
+    # Coleta as vendas do usuário logado
+    vendas = Venda.query.filter_by(usuario_id=current_user.id).all()
+    
+    data = []
+    total_vendas = 0
+    for v in vendas:
+        total_vendas += v.valor_total
+        data.append({
+            'Data/Horário': v.data_venda.strftime('%d/%m/%Y %H:%M:%S'),
+            'Produto': v.produto_nome,
+            'Quantidade': v.quantidade,
+            'Valor Total (R$)': v.valor_total,
+            'Forma de Pagamento': v.pagamento
+        })
+    
+    df = pd.DataFrame(data)
+    
+    # Adiciona uma linha de resumo ao final do Excel
+    df_resumo = pd.DataFrame([{
+        'Data/Horário': 'TOTAL DO DIA / PERÍODO',
+        'Produto': '-',
+        'Quantidade': '-',
+        'Valor Total (R$)': total_vendas,
+        'Forma de Pagamento': '-'
+    }])
+    df_final = pd.concat([df, df_resumo], ignore_index=True)
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_final.to_excel(writer, index=False, sheet_name='Relatório de Vendas')
+    
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f"relatorio_vendas_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)
