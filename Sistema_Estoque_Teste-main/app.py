@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask import flash
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from datetime import datetime
 import pandas as pd
@@ -50,7 +51,8 @@ class Fiado(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Usuario.query.get(int(user_id))
+    # CORREÇÃO: Usuario.query.get() está depreciado no SQLAlchemy 2.0 (aviso no console)
+    return db.session.get(Usuario, int(user_id))
 
 with app.app_context():
     db.create_all()
@@ -67,7 +69,10 @@ def registrar():
         if usuario_existente:
             flash('Este nome de usuário já está em uso. Escolha outro.', 'danger')
             return redirect(url_for('registrar'))
-        novo_usuario = Usuario(username=username, senha=request.form['senha'])
+
+        # CORREÇÃO: senha agora é armazenada com hash, nunca em texto puro
+        senha_hash = generate_password_hash(request.form['senha'])
+        novo_usuario = Usuario(username=username, senha=senha_hash)
         db.session.add(novo_usuario)
         db.session.commit()
 
@@ -80,7 +85,8 @@ def login():
     if request.method == 'POST':
         usuario = Usuario.query.filter_by(username=request.form['username']).first()
 
-        if usuario and usuario.senha == request.form['senha']:
+        # CORREÇÃO: comparação de senha agora usa check_password_hash (compatível com o hash salvo)
+        if usuario and check_password_hash(usuario.senha, request.form['senha']):
             login_user(usuario)
             return redirect(url_for('index'))
         
@@ -135,19 +141,27 @@ def delete(id):
 @app.route('/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 def editar(id):
-    produto = Produto.query.get_or_404(id)
+    # CORREÇÃO: agora filtra também por usuario_id, senão qualquer usuário logado
+    # conseguia editar produtos de outras pessoas só sabendo o id
+    produto = Produto.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
     if request.method == 'POST':
         produto.nome = request.form['nome']
-        produto.preco = request.form['preco']
-        produto.quantidade = request.form['quantidade']
+        # CORREÇÃO: preco e quantidade agora são convertidos para float/int,
+        # antes eram salvos como string vinda do formulário
+        produto.preco = float(request.form['preco'])
+        produto.quantidade = int(request.form['quantidade'])
         try:
             db.session.commit()
             return redirect('/')
-        except:
-            return 'Houve um erro ao atualizar o produto'
+        except Exception as e:
+            # CORREÇÃO: except genérico agora mostra o erro real, facilita debug
+            return f'Houve um erro ao atualizar o produto: {e}'
     return render_template('editar.html', produto=produto)
 
-@app.route('/registrarVendas.html', methods=['GET', 'POST'])
+# CORREÇÃO PRINCIPAL: rota renomeada de '/registrarVendas.html' para '/registrarVendas'.
+# Era esse o motivo do erro 404: a página (GET) respondia em '/registrarVendas.html',
+# mas o formulário enviava o POST para '/registrarVendas' (sem .html), URL que não existia.
+@app.route('/registrarVendas', methods=['GET', 'POST'])
 @login_required 
 def registrarVendas():
     if request.method == 'POST':
