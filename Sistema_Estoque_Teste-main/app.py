@@ -7,16 +7,16 @@ import os
 from datetime import datetime
 import pandas as pd
 import io
-
+ 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///produtos.db'
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chave-padrao-apenas-para-desenvolvimento')
 db = SQLAlchemy(app)
-
+ 
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
-
+ 
 class Usuario(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -24,14 +24,14 @@ class Usuario(UserMixin, db.Model):
     produtos = db.relationship('Produto', backref='dono', lazy='select')
     vendas = db.relationship('Venda', backref='dono', lazy='select')
     fiados = db.relationship('Fiado', backref='dono', lazy='select')
-
+ 
 class Produto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), nullable=False)
     preco = db.Column(db.Float, nullable=False)
     quantidade = db.Column(db.Integer, nullable=False)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
-
+ 
 class Venda(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     produto_nome = db.Column(db.String(100), nullable=False)
@@ -40,7 +40,7 @@ class Venda(db.Model):
     pagamento = db.Column(db.String(50), nullable=False)
     data_venda = db.Column(db.DateTime, default=datetime.now)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
-
+ 
 class Fiado(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     cliente = db.Column(db.String(100), nullable=False)
@@ -48,43 +48,43 @@ class Fiado(db.Model):
     valor_fiado = db.Column(db.Float, nullable=False)
     data_venda = db.Column(db.DateTime, default=datetime.now)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False) 
-
+ 
 @login_manager.user_loader
 def load_user(user_id):
     # CORREÇÃO: Usuario.query.get() está depreciado no SQLAlchemy 2.0 (aviso no console)
     return db.session.get(Usuario, int(user_id))
-
+ 
 with app.app_context():
     db.create_all()
-
-
+ 
+ 
 @app.route('/registrar', methods=['GET', 'POST'])
 def registrar():
-
+ 
     if request.method == 'POST':
         username = request.form['username']
-
+ 
         usuario_existente = Usuario.query.filter_by(username=username).first()
         
         if usuario_existente:
             flash('Este nome de usuário já está em uso. Escolha outro.', 'danger')
             return redirect(url_for('registrar'))
-
+ 
         # CORREÇÃO: senha agora é armazenada com hash, nunca em texto puro
         senha_hash = generate_password_hash(request.form['senha'])
         novo_usuario = Usuario(username=username, senha=senha_hash)
         db.session.add(novo_usuario)
         db.session.commit()
-
+ 
         flash('Usuário registrado com sucesso!', 'success')
         return redirect(url_for('login'))
     return render_template('registrar.html')
-
+ 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         usuario = Usuario.query.filter_by(username=request.form['username']).first()
-
+ 
         # CORREÇÃO: comparação de senha agora usa check_password_hash (compatível com o hash salvo)
         if usuario and check_password_hash(usuario.senha, request.form['senha']):
             login_user(usuario)
@@ -93,14 +93,14 @@ def login():
         else:
             flash('Usuário ou senha incorretos. Tente novamente.', 'danger')
     return render_template('login.html')
-
+ 
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
-
-
+ 
+ 
 @app.route('/', methods=['GET', 'POST'])
 @login_required 
 def index():
@@ -108,7 +108,7 @@ def index():
         nome_produto = request.form['nome']
         preco_produto = request.form['preco']
         quantidade_produto = request.form['quantidade']
-
+ 
         novo_produto = Produto(
             nome=nome_produto, 
             preco=float(preco_produto),
@@ -120,16 +120,16 @@ def index():
         return redirect('/')
     
     busca = request.args.get('busca') 
-
+ 
     query_base = Produto.query.filter_by(usuario_id=current_user.id)
-
+ 
     if busca:
         produtos = query_base.filter(Produto.nome.contains(busca)).all()
     else:
         produtos = query_base.all()
-
+ 
     return render_template('index.html', produtos=produtos)
-
+ 
 @app.route('/deletar/<int:id>')
 @login_required
 def delete(id):
@@ -137,7 +137,7 @@ def delete(id):
     db.session.delete(produto)
     db.session.commit()
     return redirect('/')
-
+ 
 @app.route('/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 def editar(id):
@@ -157,7 +157,7 @@ def editar(id):
             # CORREÇÃO: except genérico agora mostra o erro real, facilita debug
             return f'Houve um erro ao atualizar o produto: {e}'
     return render_template('editar.html', produto=produto)
-
+ 
 # CORREÇÃO PRINCIPAL: rota renomeada de '/registrarVendas.html' para '/registrarVendas'.
 # Era esse o motivo do erro 404: a página (GET) respondia em '/registrarVendas.html',
 # mas o formulário enviava o POST para 'S' (sem .html), URL que não existia.
@@ -172,7 +172,7 @@ def registrarVendas():
         cliente = request.form.get('cliente', '').strip()
         
         valor_total = preco * quantidade
-
+ 
         # Registra a venda no histórico geral
         nova_venda = Venda(
             produto_nome=nome_produto,
@@ -182,7 +182,7 @@ def registrarVendas():
             usuario_id=current_user.id
         )
         db.session.add(nova_venda)
-
+ 
         # Se for fiado, registra também na tabela de devedores
         if pagamento == 'Fiado' and cliente:
             novo_fiado = Fiado(
@@ -192,19 +192,19 @@ def registrarVendas():
                 usuario_id=current_user.id
             )
             db.session.add(novo_fiado)
-
+ 
         # Opcional: Abater automaticamente do estoque de produtos
         produto_estoque = Produto.query.filter_by(nome=nome_produto, usuario_id=current_user.id).first()
         if produto_estoque and produto_estoque.quantidade >= quantidade:
             produto_estoque.quantidade -= quantidade
-
+ 
         db.session.commit()
         flash('Venda registrada com sucesso!', 'success')
         return redirect(url_for('registrarVendas'))
-
+ 
     vendas = Venda.query.filter_by(usuario_id=current_user.id).order_by(Venda.data_venda.desc()).all()
     return render_template('registrarVendas.html', vendas=vendas)
-
+ 
 @app.route('/deletar_venda/<int:id>')
 @login_required
 def deletar_venda(id):
@@ -212,13 +212,33 @@ def deletar_venda(id):
     db.session.delete(venda)
     db.session.commit()
     return redirect(url_for('registrarVendas'))
-
-@app.route('/fiados')
+ 
+@app.route('/fiados', methods=['GET', 'POST'])
 @login_required
 def fiados():
+    # NOVO: agora a página de fiados também aceita POST, permitindo
+    # cadastrar um devedor diretamente por aqui, sem depender da opção
+    # "Fiado" na página de registrar vendas. A data continua sendo
+    # gerada automaticamente pelo default=datetime.now do model Fiado.
+    if request.method == 'POST':
+        cliente = request.form['cliente'].strip()
+        produto_nome = request.form['produto_nome'].strip()
+        valor_fiado = float(request.form['valor_fiado'])
+ 
+        novo_fiado = Fiado(
+            cliente=cliente,
+            produto_nome=produto_nome,
+            valor_fiado=valor_fiado,
+            usuario_id=current_user.id
+        )
+        db.session.add(novo_fiado)
+        db.session.commit()
+        flash('Fiado registrado com sucesso!', 'success')
+        return redirect(url_for('fiados'))
+ 
     lista_fiados = Fiado.query.filter_by(usuario_id=current_user.id).order_by(Fiado.data_venda.desc()).all()
     return render_template('fiados.html', fiados=lista_fiados)
-
+ 
 @app.route('/editar_fiado/<int:id>', methods=['GET', 'POST'])
 @login_required
 def editar_fiado(id):
@@ -231,7 +251,7 @@ def editar_fiado(id):
         flash('Registro de fiado atualizado!', 'success')
         return redirect(url_for('fiados'))
     return render_template('editar_fiado.html', fiado=fiado)
-
+ 
 @app.route('/deletar_fiado/<int:id>')
 @login_required
 def deletar_fiado(id):
@@ -240,7 +260,7 @@ def deletar_fiado(id):
     db.session.commit()
     flash('Devedor removido com sucesso!', 'success')
     return redirect(url_for('fiados'))
-
+ 
 @app.route('/exportar_excel')
 @login_required
 def exportar_excel():
@@ -282,6 +302,11 @@ def exportar_excel():
         as_attachment=True,
         download_name=f"relatorio_vendas_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     )
-
+ 
 if __name__ == '__main__':
     app.run(debug=True)
+ 
+
+
+
+
