@@ -31,7 +31,21 @@ class Produto(db.Model):
     preco = db.Column(db.Float, nullable=False)
     quantidade = db.Column(db.Integer, nullable=False)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
+
+class Prateleira(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(100), nullable=False)
+    preco = db.Column(db.Float, nullable=False)
+    quantidade = db.Column(db.Integer, nullable=False)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
  
+class Prateleira_gato(db.Model):
+    id_gatos = db.Column(db.Integer, primary_key=True)
+    nome_gatos = db.Column(db.String(100), nullable=False)
+    preco_gatos = db.Column(db.Float, nullable=False)
+    quantidade_gatos = db.Column(db.Integer, nullable=False)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
+
 class Venda(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     produto_nome = db.Column(db.String(100), nullable=False)
@@ -51,7 +65,6 @@ class Fiado(db.Model):
  
 @login_manager.user_loader
 def load_user(user_id):
-    # CORREÇÃO: Usuario.query.get() está depreciado no SQLAlchemy 2.0 (aviso no console)
     return db.session.get(Usuario, int(user_id))
  
 with app.app_context():
@@ -70,7 +83,6 @@ def registrar():
             flash('Este nome de usuário já está em uso. Escolha outro.', 'danger')
             return redirect(url_for('registrar'))
  
-        # CORREÇÃO: senha agora é armazenada com hash, nunca em texto puro
         senha_hash = generate_password_hash(request.form['senha'])
         novo_usuario = Usuario(username=username, senha=senha_hash)
         db.session.add(novo_usuario)
@@ -85,7 +97,6 @@ def login():
     if request.method == 'POST':
         usuario = Usuario.query.filter_by(username=request.form['username']).first()
  
-        # CORREÇÃO: comparação de senha agora usa check_password_hash (compatível com o hash salvo)
         if usuario and check_password_hash(usuario.senha, request.form['senha']):
             login_user(usuario)
             return redirect(url_for('index'))
@@ -130,6 +141,7 @@ def index():
  
     return render_template('index.html', produtos=produtos)
  
+ 
 @app.route('/deletar/<int:id>')
 @login_required
 def delete(id):
@@ -141,26 +153,142 @@ def delete(id):
 @app.route('/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 def editar(id):
-    # CORREÇÃO: agora filtra também por usuario_id, senão qualquer usuário logado
-    # conseguia editar produtos de outras pessoas só sabendo o id
     produto = Produto.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
     if request.method == 'POST':
         produto.nome = request.form['nome']
-        # CORREÇÃO: preco e quantidade agora são convertidos para float/int,
-        # antes eram salvos como string vinda do formulário
         produto.preco = float(request.form['preco'])
         produto.quantidade = int(request.form['quantidade'])
         try:
             db.session.commit()
             return redirect('/')
         except Exception as e:
-            # CORREÇÃO: except genérico agora mostra o erro real, facilita debug
             return f'Houve um erro ao atualizar o produto: {e}'
     return render_template('editar.html', produto=produto)
+
+# =======================================================================
+# CORREÇÃO: a rota da prateleira de produtos "normais" agora também busca
+# os produtos da prateleira de gatos e envia os DOIS para o template, já
+# que "prateleira.html" mostra as duas tabelas na mesma página.
+# =======================================================================
+@app.route('/prateleira', methods=['GET', 'POST'])
+@login_required
+def prateleira():
+    if request.method == 'POST':
+        nome_produto = request.form['nome']
+        preco_produto = request.form['preco']
+        quantidade_produto = request.form['quantidade']
  
-# CORREÇÃO PRINCIPAL: rota renomeada de '/registrarVendas.html' para '/registrarVendas'.
-# Era esse o motivo do erro 404: a página (GET) respondia em '/registrarVendas.html',
-# mas o formulário enviava o POST para 'S' (sem .html), URL que não existia.
+        novo_produto_prateleira = Prateleira(
+            nome=nome_produto, 
+            preco=float(preco_produto),
+            quantidade=int(quantidade_produto),
+            usuario_id=current_user.id
+        )
+        db.session.add(novo_produto_prateleira)
+        db.session.commit()
+        return redirect(url_for('prateleira'))
+    
+    busca = request.args.get('busca') 
+ 
+    query_base = Prateleira.query.filter_by(usuario_id=current_user.id)
+ 
+    if busca:
+        produtos = query_base.filter(Prateleira.nome.contains(busca)).all()
+    else:
+        produtos = query_base.all()
+
+    # CORREÇÃO: antes essa variável nunca era criada nem enviada ao template,
+    # por isso o Jinja2 acusava 'produto_gatos' is undefined.
+    produtos_gatos = Prateleira_gato.query.filter_by(usuario_id=current_user.id).all()
+ 
+    return render_template('prateleira.html', produtos=produtos, produtos_gatos=produtos_gatos)
+
+@app.route('/deletar_prateleira/<int:id>')
+@login_required
+def deletar_prateleira(id):
+    produto = Prateleira.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    db.session.delete(produto)
+    db.session.commit()
+    return redirect(url_for('prateleira'))
+ 
+@app.route('/editar_prateleira/<int:id>', methods=['GET', 'POST'])
+@login_required
+def editar_prateleira(id):
+    produto = Prateleira.query.filter_by(id=id, usuario_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        produto.nome = request.form['nome']
+        produto.preco = float(request.form['preco'])
+        produto.quantidade = int(request.form['quantidade'])
+        try:
+            db.session.commit()
+            return redirect(url_for('prateleira'))
+        except Exception as e:
+            return f'Houve um erro ao atualizar o produto: {e}'
+    return render_template('editar_prateleira.html', produto=produto)
+
+
+# AQUI È DOS GATOS DAQUI PRA BAIXO
+
+# =======================================================================
+# CORREÇÃO PRINCIPAL: essa rota tinha a MESMA URL '/prateleira' da rota
+# 'prateleira()' acima. Duas rotas com a mesma URL fazem o Flask/Werkzeug
+# nunca conseguir chamar a segunda (o cadastro de produtos de gatos nunca
+# rodava de verdade). Agora a URL é '/prateleira_gatos', exclusiva dela.
+#
+# Também trocamos "Prateleira(...)" por "Prateleira_gato(...)": o código
+# original tentava criar um Prateleira com campos nome_gatos/preco_gatos/
+# quantidade_gatos, que não existem nessa classe (só existem na classe
+# Prateleira_gato) — isso geraria um TypeError.
+# =======================================================================
+@app.route('/prateleira_gatos', methods=['GET', 'POST'])
+@login_required
+def prateleira_gatos():
+    if request.method == 'POST':
+        nome_produto_gatos = request.form['nome_gatos']
+        preco_produto_gatos = request.form['preco_gatos']
+        quantidade_produto_gatos = request.form['quantidade_gatos']
+ 
+        novo_produto_prateleira_gato = Prateleira_gato(
+            nome_gatos=nome_produto_gatos, 
+            preco_gatos=float(preco_produto_gatos),
+            quantidade_gatos=int(quantidade_produto_gatos),
+            usuario_id=current_user.id
+        )
+        db.session.add(novo_produto_prateleira_gato)
+        db.session.commit()
+
+    # a listagem de gatos é sempre exibida junto na página /prateleira
+    return redirect(url_for('prateleira'))
+
+@app.route('/deletar_prateleira_gatos/<int:id_gatos>')
+@login_required
+def deletar_prateleira_gatos(id_gatos):
+    # CORREÇÃO: estava consultando o model errado (Prateleira em vez de
+    # Prateleira_gato) e usando id=id_gatos, mas a chave primária dessa
+    # tabela se chama id_gatos, não id.
+    produto_gatos = Prateleira_gato.query.filter_by(id_gatos=id_gatos, usuario_id=current_user.id).first_or_404()
+    db.session.delete(produto_gatos)
+    db.session.commit()
+    return redirect(url_for('prateleira'))
+ 
+@app.route('/editar_prateleira_gatos/<int:id_gatos>', methods=['GET', 'POST'])
+@login_required
+def editar_prateleira_gatos(id_gatos):
+    # CORREÇÃO: mesmo problema acima — precisa ser Prateleira_gato e
+    # filtrar por id_gatos.
+    produto_gatos = Prateleira_gato.query.filter_by(id_gatos=id_gatos, usuario_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        produto_gatos.nome_gatos = request.form['nome_gatos']
+        produto_gatos.preco_gatos = float(request.form['preco_gatos'])
+        produto_gatos.quantidade_gatos = int(request.form['quantidade_gatos'])
+        try:
+            db.session.commit()
+            return redirect(url_for('prateleira'))
+        except Exception as e:
+            return f'Houve um erro ao atualizar o produto: {e}'
+    return render_template('editar_prateleira_gatos.html', produto_gatos=produto_gatos)
+
+ 
 @app.route('/registrarVendas', methods=['GET', 'POST'])
 @login_required 
 def registrarVendas():
@@ -173,7 +301,6 @@ def registrarVendas():
         
         valor_total = preco * quantidade
  
-        # Registra a venda no histórico geral
         nova_venda = Venda(
             produto_nome=nome_produto,
             quantidade=quantidade,
@@ -183,7 +310,6 @@ def registrarVendas():
         )
         db.session.add(nova_venda)
  
-        # Se for fiado, registra também na tabela de devedores
         if pagamento == 'Fiado' and cliente:
             novo_fiado = Fiado(
                 cliente=cliente,
@@ -193,7 +319,6 @@ def registrarVendas():
             )
             db.session.add(novo_fiado)
  
-        # Opcional: Abater automaticamente do estoque de produtos
         produto_estoque = Produto.query.filter_by(nome=nome_produto, usuario_id=current_user.id).first()
         if produto_estoque and produto_estoque.quantidade >= quantidade:
             produto_estoque.quantidade -= quantidade
@@ -216,10 +341,6 @@ def deletar_venda(id):
 @app.route('/fiados', methods=['GET', 'POST'])
 @login_required
 def fiados():
-    # NOVO: agora a página de fiados também aceita POST, permitindo
-    # cadastrar um devedor diretamente por aqui, sem depender da opção
-    # "Fiado" na página de registrar vendas. A data continua sendo
-    # gerada automaticamente pelo default=datetime.now do model Fiado.
     if request.method == 'POST':
         cliente = request.form['cliente'].strip()
         produto_nome = request.form['produto_nome'].strip()
@@ -264,7 +385,6 @@ def deletar_fiado(id):
 @app.route('/exportar_excel')
 @login_required
 def exportar_excel():
-    # Coleta as vendas do usuário logado
     vendas = Venda.query.filter_by(usuario_id=current_user.id).all()
     
     data = []
@@ -281,7 +401,6 @@ def exportar_excel():
     
     df = pd.DataFrame(data)
     
-    # Adiciona uma linha de resumo ao final do Excel
     df_resumo = pd.DataFrame([{
         'Data/Horário': 'TOTAL DO DIA / PERÍODO',
         'Produto': '-',
@@ -302,11 +421,6 @@ def exportar_excel():
         as_attachment=True,
         download_name=f"relatorio_vendas_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     )
- 
+
 if __name__ == '__main__':
     app.run(debug=True)
- 
-
-
-
-
